@@ -259,8 +259,11 @@ export default function App() {
         return;
       }
 
-      const pcm = new Int16Array(payload.buffer, payload.byteOffset, payload.byteLength / 2);
-      playerRef.current?.enqueuePcm16(new Int16Array(pcm));
+      // payload starts at offset 1 in the framed packet, so copy into aligned buffer first.
+      const alignedPcmBytes = new Uint8Array(payload.byteLength);
+      alignedPcmBytes.set(payload);
+      const pcm = new Int16Array(alignedPcmBytes.buffer);
+      playerRef.current?.enqueuePcm16(pcm);
       void playerRef.current?.start();
       setStatus("speaking");
       armSpeakingFallback();

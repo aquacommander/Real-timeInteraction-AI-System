@@ -377,6 +377,10 @@ wss.on("connection", (socket, request) => {
 httpServer.listen(port, () => {
   log("INFO", "server.started", {
     port,
-    wsPath: WS_PATH
+    wsPath: WS_PATH,
+    liveMode: useVertex ? "vertex" : "developer_api",
+    liveModel: geminiModel,
+    vertexProject: useVertex ? vertexProject : undefined,
+    vertexLocation: useVertex ? vertexLocation : undefined
   });
 });
