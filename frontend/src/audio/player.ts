@@ -6,6 +6,30 @@ function pcm16ToFloat32(pcm: Int16Array): Float32Array {
   return float;
 }
 
+function resampleFloat32(
+  input: Float32Array,
+  inputSampleRate: number,
+  outputSampleRate: number
+): Float32Array {
+  if (inputSampleRate === outputSampleRate) {
+    return input;
+  }
+
+  const ratio = inputSampleRate / outputSampleRate;
+  const outputLength = Math.max(1, Math.round(input.length / ratio));
+  const output = new Float32Array(outputLength);
+
+  for (let i = 0; i < outputLength; i += 1) {
+    const sourceIndex = i * ratio;
+    const low = Math.floor(sourceIndex);
+    const high = Math.min(low + 1, input.length - 1);
+    const t = sourceIndex - low;
+    output[i] = input[low] * (1 - t) + input[high] * t;
+  }
+
+  return output;
+}
+
 type QueueChunk = {
   data: Float32Array;
   offset: number;
@@ -16,8 +40,10 @@ export class StreamingPcmPlayer {
   private processorNode: ScriptProcessorNode;
   private queue: QueueChunk[] = [];
   private started = false;
+  private readonly inputSampleRate: number;
 
-  constructor() {
+  constructor(inputSampleRate = 24_000) {
+    this.inputSampleRate = inputSampleRate;
     this.audioContext = new AudioContext();
     this.processorNode = this.audioContext.createScriptProcessor(2048, 1, 1);
     this.processorNode.onaudioprocess = (event) => {
@@ -39,8 +65,13 @@ export class StreamingPcmPlayer {
 
   enqueuePcm16(pcm: Int16Array): void {
     const floatChunk = pcm16ToFloat32(pcm);
+    const resampledChunk = resampleFloat32(
+      floatChunk,
+      this.inputSampleRate,
+      this.audioContext.sampleRate
+    );
     this.queue.push({
-      data: floatChunk,
+      data: resampledChunk,
       offset: 0
     });
   }
