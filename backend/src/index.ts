@@ -19,7 +19,8 @@ const useVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true";
 const vertexProject = process.env.GOOGLE_CLOUD_PROJECT ?? "";
 const vertexLocation = process.env.GOOGLE_CLOUD_LOCATION ?? "us-central1";
 const geminiModel =
-  process.env.GEMINI_LIVE_MODEL ?? "gemini-2.5-flash-native-audio-preview-12-2025";
+  process.env.GEMINI_LIVE_MODEL ??
+  (useVertex ? "gemini-2.0-flash-live-preview-04-09" : "gemini-live-2.5-flash-preview");
 const geminiSystemInstruction =
   process.env.GEMINI_SYSTEM_INSTRUCTION ??
   "You are a concise and helpful real-time voice assistant. Keep answers brief and natural.";
@@ -163,6 +164,7 @@ wss.on("connection", (socket, request) => {
           });
         },
         onClose: (reason) => {
+          state.geminiReady = false;
           state.suppressMicForwarding = false;
           log("INFO", "gemini.session.closed", {
             connectionId,

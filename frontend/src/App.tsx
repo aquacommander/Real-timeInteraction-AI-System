@@ -193,6 +193,9 @@ export default function App() {
 
         if (parsed.type === "gemini_session_ready") {
           setActiveModel(parsed.model);
+          if (micRef.current) {
+            setStatus("listening");
+          }
         }
 
         if (parsed.type === "gemini_turn_complete" && micRef.current) {
@@ -207,6 +210,14 @@ export default function App() {
         }
 
         if (parsed.type === "gemini_error") {
+          setActiveModel(null);
+          playerRef.current?.stopAndFlush();
+          clearSpeakingFallback();
+          if (micRef.current) {
+            setStatus("listening");
+          } else {
+            setStatus("disconnected");
+          }
           pushLog({
             direction: "system",
             message: `Gemini error: ${parsed.message}`
@@ -304,7 +315,9 @@ export default function App() {
       text: trimmed,
       timestamp: nowIso()
     });
-    setStatus("speaking");
+    if (micRef.current) {
+      setStatus("speaking");
+    }
   };
 
   useEffect(() => {
@@ -335,7 +348,7 @@ export default function App() {
           </button>
           <button
             onClick={triggerTextPrompt}
-            disabled={status === "disconnected" || status === "connecting"}
+            disabled={status === "disconnected" || status === "connecting" || status === "speaking"}
           >
             Send Text Prompt
           </button>
@@ -349,7 +362,10 @@ export default function App() {
             onChange={(event) => setPromptText(event.target.value)}
             placeholder="Text fallback prompt to Gemini"
           />
-          <button type="submit" disabled={status === "disconnected" || status === "connecting"}>
+          <button
+            type="submit"
+            disabled={status === "disconnected" || status === "connecting" || status === "speaking"}
+          >
             Ask Gemini
           </button>
         </form>
