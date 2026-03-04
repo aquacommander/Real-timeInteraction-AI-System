@@ -1,0 +1,12 @@
+{
+  "name": "live-agents-hackathon",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Real-time multimodal Live Agents hackathon project",
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "live-agents-backend": "file:.."
+  }
+}

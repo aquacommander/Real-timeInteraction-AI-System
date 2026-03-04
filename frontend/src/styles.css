@@ -1,0 +1,136 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  color: #e8eef7;
+  background: #0c1222;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.subtitle {
+  margin-top: 8px;
+  color: #9eb0cf;
+}
+
+.panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #25304c;
+  border-radius: 12px;
+  background: #101935;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+button,
+input {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #334168;
+  background: #101935;
+  color: #e8eef7;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input {
+  min-width: 300px;
+}
+
+.status {
+  display: inline-block;
+  font-size: 0.8rem;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #556792;
+}
+
+.status-disconnected {
+  color: #ffb3b3;
+}
+
+.status-connecting {
+  color: #ffecb3;
+}
+
+.status-listening {
+  color: #b3ffcc;
+}
+
+.status-speaking {
+  color: #a8d1ff;
+}
+
+.meta {
+  margin: 10px 0 0;
+  color: #b1c1dc;
+}
+
+.log-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.log-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #2c3859;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 0.9rem;
+}
+
+.log-list li span {
+  color: #9eb0cf;
+}
+
+.log-system {
+  border-color: #59698d;
+}
+
+.log-inbound {
+  border-color: #2d6f52;
+}
+
+.log-outbound {
+  border-color: #6f4e2d;
+}
+
+.empty {
+  color: #9eb0cf;
+}
