@@ -25,6 +25,7 @@ type LiveSession = {
     audio?: { data: string; mimeType: string };
     audioStreamEnd?: boolean;
     text?: string;
+    activityStart?: Record<string, never>;
   }) => void;
   sendClientContent: (params: { turns?: unknown; turnComplete?: boolean }) => void;
   close: () => void;
@@ -121,6 +122,25 @@ export class GeminiLiveBridge {
     this.connected = false;
     this.session?.close();
     this.session = null;
+  }
+
+  async interruptGeneration(): Promise<void> {
+    if (!this.session) {
+      await this.connect();
+      return;
+    }
+
+    try {
+      this.session.sendRealtimeInput({ activityStart: {} });
+      this.session.sendRealtimeInput({ audioStreamEnd: true });
+    } catch {
+      // Ignore transient socket issues; we'll recreate the session anyway.
+    }
+
+    this.session.close();
+    this.session = null;
+    this.connected = false;
+    await this.connect();
   }
 
   private handleServerMessage(message: LiveServerMessage): void {

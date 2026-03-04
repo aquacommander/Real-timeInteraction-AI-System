@@ -54,6 +54,7 @@ type ConnectionState = {
   gemini: GeminiLiveBridge | null;
   geminiReady: boolean;
   suppressMicForwarding: boolean;
+  suppressNextCloseError: boolean;
 };
 
 function cleanupGemini(state: ConnectionState): void {
@@ -79,7 +80,8 @@ wss.on("connection", (socket, request) => {
     inputSampleRate: 16_000,
     gemini: null,
     geminiReady: false,
-    suppressMicForwarding: false
+    suppressMicForwarding: false,
+    suppressNextCloseError: false
   };
 
   log("INFO", "ws.connection.opened", {
@@ -170,6 +172,10 @@ wss.on("connection", (socket, request) => {
             connectionId,
             reason
           });
+          if (state.suppressNextCloseError) {
+            state.suppressNextCloseError = false;
+            return;
+          }
           sendJson(socket, {
             type: "gemini_error",
             message: `Gemini session closed: ${reason}`,
@@ -192,7 +198,7 @@ wss.on("connection", (socket, request) => {
     });
   }
 
-  socket.on("message", (data, isBinary) => {
+  socket.on("message", async (data, isBinary) => {
     if (isBinary) {
       const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
       if (bytes.length < 2) {
@@ -343,6 +349,37 @@ wss.on("connection", (socket, request) => {
         connectionId,
         requestId: parsed.requestId
       });
+      return;
+    }
+
+    if (parsed.type === "barge_in") {
+      log("INFO", "gemini.barge_in", {
+        connectionId,
+        requestId: parsed.requestId,
+        energy: parsed.energy
+      });
+      state.suppressMicForwarding = false;
+      state.geminiReady = false;
+      state.suppressNextCloseError = true;
+      sendJson(socket, {
+        type: "model_interrupted",
+        timestamp: new Date().toISOString()
+      });
+
+      try {
+        await state.gemini?.interruptGeneration();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown interrupt failure";
+        log("ERROR", "gemini.barge_in.failed", {
+          connectionId,
+          message
+        });
+        sendJson(socket, {
+          type: "gemini_error",
+          message: `Barge-in failed: ${message}`,
+          timestamp: new Date().toISOString()
+        });
+      }
       return;
     }
 

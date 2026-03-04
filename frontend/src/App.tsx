@@ -20,6 +20,10 @@ type LogEntry = {
   timestamp: string;
 };
 
+const BARGE_IN_ENERGY_THRESHOLD = 0.018;
+const BARGE_IN_CONSECUTIVE_FRAMES = 3;
+const BARGE_IN_COOLDOWN_MS = 1200;
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -28,6 +32,18 @@ function id(): string {
   return typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : Math.random().toString(16).slice(2);
+}
+
+function getNormalizedEnergy(pcm16: Int16Array): number {
+  if (pcm16.length === 0) {
+    return 0;
+  }
+  let sumSquares = 0;
+  for (let i = 0; i < pcm16.length; i += 1) {
+    const normalized = pcm16[i] / 32768;
+    sumSquares += normalized * normalized;
+  }
+  return Math.sqrt(sumSquares / pcm16.length);
 }
 
 export default function App() {
@@ -44,7 +60,10 @@ export default function App() {
   const micRef = useRef<MicrophoneStreamer | null>(null);
   const playerRef = useRef<StreamingPcmPlayer | null>(null);
   const speakingFallbackTimerRef = useRef<number | null>(null);
+  const statusRef = useRef<AgentUiState>("disconnected");
   const micInputSampleRateRef = useRef<number>(16_000);
+  const consecutiveSpeechFramesRef = useRef(0);
+  const lastBargeInAtRef = useRef(0);
   const modelInputSampleRate = 16_000;
   const clientId = useMemo(() => createClientId(), []);
 
@@ -86,6 +105,37 @@ export default function App() {
     frame.set(pcmBytes, 1);
     socket.send(frame);
     setMicChunkCount((count) => count + 1);
+
+    if (statusRef.current === "speaking") {
+      const energy = getNormalizedEnergy(resampled);
+      if (energy >= BARGE_IN_ENERGY_THRESHOLD) {
+        consecutiveSpeechFramesRef.current += 1;
+      } else {
+        consecutiveSpeechFramesRef.current = 0;
+      }
+
+      const nowMs = Date.now();
+      if (
+        consecutiveSpeechFramesRef.current >= BARGE_IN_CONSECUTIVE_FRAMES &&
+        nowMs - lastBargeInAtRef.current >= BARGE_IN_COOLDOWN_MS
+      ) {
+        lastBargeInAtRef.current = nowMs;
+        consecutiveSpeechFramesRef.current = 0;
+        playerRef.current?.stopAndFlush();
+        clearSpeakingFallback();
+        setStatus("listening");
+        sendJson({
+          type: "barge_in",
+          requestId: id(),
+          energy,
+          timestamp: nowIso()
+        });
+        pushLog({
+          direction: "system",
+          message: `Barge-in triggered (energy=${energy.toFixed(4)})`
+        });
+      }
+    }
   };
 
   const sendJson = (message: ClientToServerMessage): void => {
@@ -322,6 +372,10 @@ export default function App() {
       setStatus("speaking");
     }
   };
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   useEffect(() => {
     return () => {

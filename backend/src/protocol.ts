@@ -36,6 +36,12 @@ export type ClientToServerMessage =
       requestId: string;
       text: string;
       timestamp: string;
+    }
+  | {
+      type: "barge_in";
+      requestId: string;
+      energy: number;
+      timestamp: string;
     };
 
 export type ServerToClientMessage =
