@@ -11,7 +11,10 @@ type GeminiLiveBridgeCallbacks = {
 };
 
 type GeminiLiveBridgeOptions = {
-  apiKey: string;
+  apiKey?: string;
+  useVertex?: boolean;
+  project?: string;
+  location?: string;
   model: string;
   systemInstruction: string;
   callbacks: GeminiLiveBridgeCallbacks;
@@ -23,6 +26,7 @@ type LiveSession = {
     audioStreamEnd?: boolean;
     text?: string;
   }) => void;
+  sendClientContent: (params: { turns?: unknown; turnComplete?: boolean }) => void;
   close: () => void;
 };
 
@@ -35,7 +39,15 @@ export class GeminiLiveBridge {
   private connected = false;
 
   constructor(options: GeminiLiveBridgeOptions) {
-    this.ai = new GoogleGenAI({ apiKey: options.apiKey });
+    if (options.useVertex) {
+      this.ai = new GoogleGenAI({
+        vertexai: true,
+        project: options.project,
+        location: options.location ?? "us-central1"
+      });
+    } else {
+      this.ai = new GoogleGenAI({ apiKey: options.apiKey });
+    }
     this.model = options.model;
     this.systemInstruction = options.systemInstruction;
     this.callbacks = options.callbacks;
@@ -99,8 +111,9 @@ export class GeminiLiveBridge {
     if (!this.session) {
       return;
     }
-    this.session.sendRealtimeInput({
-      text
+    this.session.sendClientContent({
+      turns: text,
+      turnComplete: true
     });
   }
 

@@ -15,6 +15,9 @@ import {
 
 const port = Number(process.env.PORT ?? 8080);
 const geminiApiKey = process.env.GEMINI_API_KEY ?? "";
+const useVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true";
+const vertexProject = process.env.GOOGLE_CLOUD_PROJECT ?? "";
+const vertexLocation = process.env.GOOGLE_CLOUD_LOCATION ?? "us-central1";
 const geminiModel =
   process.env.GEMINI_LIVE_MODEL ?? "gemini-2.5-flash-native-audio-preview-12-2025";
 const geminiSystemInstruction =
@@ -49,6 +52,7 @@ type ConnectionState = {
   inputSampleRate: number;
   gemini: GeminiLiveBridge | null;
   geminiReady: boolean;
+  suppressMicForwarding: boolean;
 };
 
 function cleanupGemini(state: ConnectionState): void {
@@ -73,7 +77,8 @@ wss.on("connection", (socket, request) => {
     receivedAudioBytes: 0,
     inputSampleRate: 16_000,
     gemini: null,
-    geminiReady: false
+    geminiReady: false,
+    suppressMicForwarding: false
   };
 
   log("INFO", "ws.connection.opened", {
@@ -88,15 +93,24 @@ wss.on("connection", (socket, request) => {
     message: "WebSocket connected"
   });
 
-  if (!geminiApiKey) {
+  if (!useVertex && !geminiApiKey) {
     sendJson(socket, {
       type: "gemini_error",
       message: "Missing GEMINI_API_KEY in backend environment",
       timestamp: new Date().toISOString()
     });
+  } else if (useVertex && !vertexProject) {
+    sendJson(socket, {
+      type: "gemini_error",
+      message: "Missing GOOGLE_CLOUD_PROJECT for Vertex AI mode",
+      timestamp: new Date().toISOString()
+    });
   } else {
     const geminiBridge = new GeminiLiveBridge({
       apiKey: geminiApiKey,
+      useVertex,
+      project: vertexProject,
+      location: vertexLocation,
       model: geminiModel,
       systemInstruction: geminiSystemInstruction,
       callbacks: {
@@ -123,18 +137,21 @@ wss.on("connection", (socket, request) => {
           });
         },
         onTurnComplete: () => {
+          state.suppressMicForwarding = false;
           sendJson(socket, {
             type: "gemini_turn_complete",
             timestamp: new Date().toISOString()
           });
         },
         onInterrupted: () => {
+          state.suppressMicForwarding = false;
           sendJson(socket, {
             type: "model_interrupted",
             timestamp: new Date().toISOString()
           });
         },
         onError: (message) => {
+          state.suppressMicForwarding = false;
           log("ERROR", "gemini.session.error", {
             connectionId,
             message
@@ -146,6 +163,7 @@ wss.on("connection", (socket, request) => {
           });
         },
         onClose: (reason) => {
+          state.suppressMicForwarding = false;
           log("INFO", "gemini.session.closed", {
             connectionId,
             reason
@@ -200,7 +218,9 @@ wss.on("connection", (socket, request) => {
 
       state.receivedAudioFrames += 1;
       state.receivedAudioBytes += payload.byteLength;
-      state.gemini?.sendAudioChunk(payload, state.inputSampleRate);
+      if (!state.suppressMicForwarding) {
+        state.gemini?.sendAudioChunk(payload, state.inputSampleRate);
+      }
 
       if (state.receivedAudioFrames % 25 === 0) {
         log("INFO", "audio.mic.progress", {
@@ -296,6 +316,7 @@ wss.on("connection", (socket, request) => {
 
     if (parsed.type === "stop_listening") {
       state.listening = false;
+      state.suppressMicForwarding = false;
       state.gemini?.sendAudioStreamEnd();
       log("INFO", "audio.listening.stopped", {
         connectionId
@@ -312,6 +333,9 @@ wss.on("connection", (socket, request) => {
         });
         return;
       }
+      // Pause mic forwarding while handling a deterministic text turn.
+      state.suppressMicForwarding = true;
+      state.gemini?.sendAudioStreamEnd();
       state.gemini?.sendTextPrompt(parsed.text);
       log("INFO", "gemini.text.prompt", {
         connectionId,
