@@ -72,6 +72,14 @@ function sendFramedBinary(socket: WebSocket, frameType: number, payload: Buffer)
   socket.send(outbound, { binary: true });
 }
 
+function getBase64ByteLength(base64: string): number {
+  try {
+    return Buffer.from(base64, "base64").byteLength;
+  } catch {
+    return 0;
+  }
+}
+
 wss.on("connection", (socket, request) => {
   const connectionId = randomUUID();
   const connectedAt = new Date().toISOString();
@@ -350,6 +358,54 @@ wss.on("connection", (socket, request) => {
       log("INFO", "gemini.text.prompt", {
         connectionId,
         requestId: parsed.requestId
+      });
+      return;
+    }
+
+    if (parsed.type === "send_snapshot_prompt") {
+      if (!state.geminiReady) {
+        sendJson(socket, {
+          type: "gemini_error",
+          message: "Gemini session is not ready yet",
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+
+      if (parsed.mimeType !== "image/jpeg" && parsed.mimeType !== "image/png") {
+        sendJson(socket, {
+          type: "gemini_error",
+          message: "Unsupported snapshot mime type",
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+
+      const imageBytes = getBase64ByteLength(parsed.imageBase64);
+      if (imageBytes <= 0) {
+        sendJson(socket, {
+          type: "gemini_error",
+          message: "Snapshot payload is empty or invalid",
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+
+      state.suppressMicForwarding = true;
+      state.gemini?.sendAudioStreamEnd();
+      state.gemini?.sendImagePrompt(parsed.question, parsed.imageBase64, parsed.mimeType);
+      log("INFO", "gemini.snapshot.prompt", {
+        connectionId,
+        requestId: parsed.requestId,
+        mimeType: parsed.mimeType,
+        imageBytes
+      });
+      sendJson(socket, {
+        type: "snapshot_received",
+        requestId: parsed.requestId,
+        mimeType: parsed.mimeType,
+        imageBytes,
+        timestamp: new Date().toISOString()
       });
       return;
     }

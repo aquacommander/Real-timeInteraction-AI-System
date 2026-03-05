@@ -42,6 +42,14 @@ export type ClientToServerMessage =
       requestId: string;
       energy: number;
       timestamp: string;
+    }
+  | {
+      type: "send_snapshot_prompt";
+      requestId: string;
+      question: string;
+      mimeType: "image/jpeg" | "image/png";
+      imageBase64: string;
+      timestamp: string;
     };
 
 export type ServerToClientMessage =
@@ -95,6 +103,13 @@ export type ServerToClientMessage =
   | {
       type: "gemini_error";
       message: string;
+      timestamp: string;
+    }
+  | {
+      type: "snapshot_received";
+      requestId: string;
+      mimeType: string;
+      imageBytes: number;
       timestamp: string;
     }
   | {
