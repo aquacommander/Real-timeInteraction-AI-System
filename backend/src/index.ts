@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
@@ -12,6 +12,8 @@ import {
   type ClientToServerMessage,
   type ServerToClientMessage
 } from "./protocol.js";
+
+dotenv.config({ override: true });
 
 const port = Number(process.env.PORT ?? 8080);
 const geminiApiKey = process.env.GEMINI_API_KEY ?? "";
