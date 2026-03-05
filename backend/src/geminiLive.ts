@@ -118,6 +118,30 @@ export class GeminiLiveBridge {
     });
   }
 
+  sendImagePrompt(question: string, imageBase64: string, mimeType: string): void {
+    if (!this.session) {
+      return;
+    }
+
+    this.session.sendClientContent({
+      turns: [
+        {
+          role: "user",
+          parts: [
+            { text: question.trim() || "What do you see in this image?" },
+            {
+              inlineData: {
+                mimeType,
+                data: imageBase64
+              }
+            }
+          ]
+        }
+      ],
+      turnComplete: true
+    });
+  }
+
   close(): void {
     this.connected = false;
     this.session?.close();

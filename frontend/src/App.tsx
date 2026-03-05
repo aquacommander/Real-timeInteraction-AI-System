@@ -24,6 +24,7 @@ const BARGE_IN_ENERGY_THRESHOLD = 0.04;
 const BARGE_IN_CONSECUTIVE_FRAMES = 4;
 const BARGE_IN_COOLDOWN_MS = 1500;
 const BARGE_IN_ARM_DELAY_MS = 700;
+const CAMERA_SNAPSHOT_MIME = "image/jpeg";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -55,11 +56,18 @@ export default function App() {
   const [lastAckBytes, setLastAckBytes] = useState<number | null>(null);
   const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [promptText, setPromptText] = useState("Give me one fun fact about space.");
+  const [snapshotQuestion, setSnapshotQuestion] = useState("What do you see in this image?");
   const [activeModel, setActiveModel] = useState<string | null>(null);
+  const [isCameraEnabled, setIsCameraEnabled] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [snapshotPreviewDataUrl, setSnapshotPreviewDataUrl] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const micRef = useRef<MicrophoneStreamer | null>(null);
   const playerRef = useRef<StreamingPcmPlayer | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   const speakingFallbackTimerRef = useRef<number | null>(null);
   const statusRef = useRef<AgentUiState>("disconnected");
   const micInputSampleRateRef = useRef<number>(16_000);
@@ -199,6 +207,49 @@ export default function App() {
     setIsMicEnabled(false);
   };
 
+  const stopCamera = (): void => {
+    const stream = cameraStreamRef.current;
+    if (!stream) {
+      setIsCameraEnabled(false);
+      return;
+    }
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+    cameraStreamRef.current = null;
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+    setIsCameraEnabled(false);
+  };
+
+  const startCamera = async (): Promise<void> => {
+    if (cameraStreamRef.current) {
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false
+      });
+      cameraStreamRef.current = stream;
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = stream;
+        await cameraVideoRef.current.play();
+      }
+      setCameraError(null);
+      setIsCameraEnabled(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to start camera";
+      setCameraError(message);
+      setIsCameraEnabled(false);
+      pushLog({
+        direction: "system",
+        message: `Camera start failed: ${message}`
+      });
+    }
+  };
+
   const connect = (): void => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       return;
@@ -286,6 +337,13 @@ export default function App() {
           pushLog({
             direction: "system",
             message: `Gemini error: ${parsed.message}`
+          });
+        }
+
+        if (parsed.type === "snapshot_received") {
+          pushLog({
+            direction: "system",
+            message: `Snapshot received by backend (${parsed.imageBytes} bytes, ${parsed.mimeType})`
           });
         }
 
@@ -395,6 +453,68 @@ export default function App() {
     }
   };
 
+  const sendSnapshotPrompt = (): void => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      pushLog({
+        direction: "system",
+        message: "Cannot send snapshot: socket is not open"
+      });
+      return;
+    }
+
+    const video = cameraVideoRef.current;
+    const canvas = captureCanvasRef.current;
+    if (!video || !canvas || !cameraStreamRef.current) {
+      pushLog({
+        direction: "system",
+        message: "Cannot send snapshot: camera is not active"
+      });
+      return;
+    }
+
+    const width = video.videoWidth || 640;
+    const height = video.videoHeight || 360;
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      pushLog({
+        direction: "system",
+        message: "Cannot send snapshot: 2D canvas context not available"
+      });
+      return;
+    }
+
+    context.drawImage(video, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL(CAMERA_SNAPSHOT_MIME, 0.9);
+    setSnapshotPreviewDataUrl(dataUrl);
+
+    const base64Prefix = `data:${CAMERA_SNAPSHOT_MIME};base64,`;
+    const imageBase64 = dataUrl.startsWith(base64Prefix) ? dataUrl.slice(base64Prefix.length) : "";
+    if (!imageBase64) {
+      pushLog({
+        direction: "system",
+        message: "Cannot send snapshot: image encoding failed"
+      });
+      return;
+    }
+
+    sendJson({
+      type: "send_snapshot_prompt",
+      requestId: id(),
+      question: snapshotQuestion.trim() || "What do you see in this image?",
+      mimeType: CAMERA_SNAPSHOT_MIME,
+      imageBase64,
+      timestamp: nowIso()
+    });
+
+    if (micRef.current) {
+      setStatus("listening");
+    }
+  };
+
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
@@ -402,6 +522,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       clearSpeakingFallback();
+      stopCamera();
       socketRef.current?.close(1000, "Unmount cleanup");
       void micRef.current?.stop();
       void playerRef.current?.destroy();
@@ -410,8 +531,8 @@ export default function App() {
 
   return (
     <main className="app">
-      <h1>Live Agents - Milestone 3</h1>
-      <p className="subtitle">Gemini Live audio conversation relay</p>
+      <h1>Live Agents - Milestone 5</h1>
+      <p className="subtitle">Gemini Live multimodal conversation relay (audio + snapshot)</p>
 
       <section className="panel">
         <div className="row">
@@ -448,6 +569,42 @@ export default function App() {
             Ask Gemini
           </button>
         </form>
+        <div className="row snapshot-row">
+          <input
+            value={snapshotQuestion}
+            onChange={(event) => setSnapshotQuestion(event.target.value)}
+            placeholder="Snapshot question (e.g. What do you see?)"
+          />
+          <button type="button" onClick={() => void startCamera()} disabled={isCameraEnabled}>
+            Start Camera
+          </button>
+          <button type="button" onClick={stopCamera} disabled={!isCameraEnabled}>
+            Stop Camera
+          </button>
+          <button
+            type="button"
+            onClick={sendSnapshotPrompt}
+            disabled={!isCameraEnabled || status === "disconnected" || status === "connecting" || status === "speaking"}
+          >
+            Send Snapshot
+          </button>
+        </div>
+        {cameraError ? <p className="meta error-text">Camera error: {cameraError}</p> : null}
+        <div className="camera-grid">
+          <div className="camera-panel">
+            <p className="meta">Camera preview</p>
+            <video ref={cameraVideoRef} autoPlay muted playsInline className="camera-video" />
+          </div>
+          <div className="camera-panel">
+            <p className="meta">Latest snapshot</p>
+            {snapshotPreviewDataUrl ? (
+              <img src={snapshotPreviewDataUrl} alt="Captured snapshot" className="snapshot-image" />
+            ) : (
+              <p className="meta">No snapshot captured yet.</p>
+            )}
+          </div>
+        </div>
+        <canvas ref={captureCanvasRef} className="hidden-canvas" />
         <p className="meta">
           Client ID: <code>{clientId}</code>
         </p>
@@ -466,6 +623,9 @@ export default function App() {
         </p>
         <p className="meta">
           Mic permission: <strong>{isMicEnabled ? "granted" : "not active"}</strong>
+        </p>
+        <p className="meta">
+          Camera: <strong>{isCameraEnabled ? "active" : "not active"}</strong>
         </p>
       </section>
 
