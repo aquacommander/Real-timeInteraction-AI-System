@@ -20,9 +20,10 @@ type LogEntry = {
   timestamp: string;
 };
 
-const BARGE_IN_ENERGY_THRESHOLD = 0.018;
-const BARGE_IN_CONSECUTIVE_FRAMES = 3;
-const BARGE_IN_COOLDOWN_MS = 1200;
+const BARGE_IN_ENERGY_THRESHOLD = 0.04;
+const BARGE_IN_CONSECUTIVE_FRAMES = 4;
+const BARGE_IN_COOLDOWN_MS = 1500;
+const BARGE_IN_ARM_DELAY_MS = 700;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -64,6 +65,8 @@ export default function App() {
   const micInputSampleRateRef = useRef<number>(16_000);
   const consecutiveSpeechFramesRef = useRef(0);
   const lastBargeInAtRef = useRef(0);
+  const canBargeInRef = useRef(false);
+  const bargeInArmAtRef = useRef(0);
   const modelInputSampleRate = 16_000;
   const clientId = useMemo(() => createClientId(), []);
 
@@ -106,7 +109,10 @@ export default function App() {
     socket.send(frame);
     setMicChunkCount((count) => count + 1);
 
-    if (statusRef.current === "speaking") {
+    if (statusRef.current === "speaking" && canBargeInRef.current) {
+      if (Date.now() < bargeInArmAtRef.current) {
+        return;
+      }
       const energy = getNormalizedEnergy(resampled);
       if (energy >= BARGE_IN_ENERGY_THRESHOLD) {
         consecutiveSpeechFramesRef.current += 1;
@@ -121,6 +127,7 @@ export default function App() {
       ) {
         lastBargeInAtRef.current = nowMs;
         consecutiveSpeechFramesRef.current = 0;
+        canBargeInRef.current = false;
         playerRef.current?.stopAndFlush();
         clearSpeakingFallback();
         setStatus("listening");
@@ -243,16 +250,22 @@ export default function App() {
 
         if (parsed.type === "gemini_session_ready") {
           setActiveModel(parsed.model);
+          canBargeInRef.current = false;
+          bargeInArmAtRef.current = 0;
           if (micRef.current) {
             setStatus("listening");
           }
         }
 
         if (parsed.type === "gemini_turn_complete" && micRef.current) {
+          canBargeInRef.current = false;
+          consecutiveSpeechFramesRef.current = 0;
           setStatus("listening");
         }
 
         if (parsed.type === "model_interrupted") {
+          canBargeInRef.current = false;
+          consecutiveSpeechFramesRef.current = 0;
           playerRef.current?.stopAndFlush();
           if (micRef.current) {
             setStatus("listening");
@@ -260,6 +273,8 @@ export default function App() {
         }
 
         if (parsed.type === "gemini_error") {
+          canBargeInRef.current = false;
+          consecutiveSpeechFramesRef.current = 0;
           setActiveModel(null);
           playerRef.current?.stopAndFlush();
           clearSpeakingFallback();
@@ -315,6 +330,8 @@ export default function App() {
       const pcm = new Int16Array(alignedPcmBytes.buffer);
       playerRef.current?.enqueuePcm16(pcm);
       void playerRef.current?.start();
+      canBargeInRef.current = true;
+      bargeInArmAtRef.current = Date.now() + BARGE_IN_ARM_DELAY_MS;
       setStatus("speaking");
       armSpeakingFallback();
       setReceivedAudioBytes((current) => current + payload.byteLength);
@@ -326,6 +343,8 @@ export default function App() {
     };
 
     socket.onclose = async (event) => {
+      canBargeInRef.current = false;
+      consecutiveSpeechFramesRef.current = 0;
       clearSpeakingFallback();
       await stopMicrophone();
       playerRef.current?.stopAndFlush();
@@ -346,6 +365,8 @@ export default function App() {
   };
 
   const disconnect = (): void => {
+    canBargeInRef.current = false;
+    consecutiveSpeechFramesRef.current = 0;
     clearSpeakingFallback();
     socketRef.current?.close(1000, "Client disconnect");
     socketRef.current = null;
@@ -368,8 +389,9 @@ export default function App() {
       text: trimmed,
       timestamp: nowIso()
     });
+    // Wait for first model audio chunk before entering speaking mode.
     if (micRef.current) {
-      setStatus("speaking");
+      setStatus("listening");
     }
   };
 
